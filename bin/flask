@@ -1,0 +1,187 @@
+#! /usr/bin/env bash
+
+MYSQL_CONTAINER="mysql:5.6"
+FLASK_CONTAINER="codemonauts/flask-dev-env"
+
+
+# Check if an Docker Image is availabe and not older than a few days
+function should_pull {
+  NAME=$1
+  if ! image_exists $NAME; then
+    # image not available
+    return 0
+  elif [ -z "$(docker images --format "{{.CreatedSince}}" "$1" | grep -E '(hour|minutes|seconds)')" ]; then
+    # image is only a few hours oldNew
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Check if an Docker Image existst on the host
+function image_exists {
+  if [ -z "$(docker images -q "$1" )" ]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
+# Check if a named container is running
+function is_running {
+  NAME=$1
+  if [ -z "$(docker ps -q -f "name=$NAME")" ]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
+# Create the needed directorys on the host which will be used as
+# container volumes for persistent storage
+function create_volumes {
+    mkdir -p ${HOME}/databases
+    mkdir -p ${HOME}/database_config
+}
+
+# Start the MySQL container if needed
+function start_mysql {
+  if is_running "mysql"; then
+    log_success "Mysql already running"
+    return
+  else
+    log_info "Need to start Mysql"
+  fi
+
+  if  ! image_exists "$MYSQL_CONTAINER"; then
+    log_info "Pulling MySQL image"
+    docker pull "$MYSQL_CONTAINER" > /dev/null
+  fi
+
+  docker run --rm -d --name mysql -p 3306:3306 -v "${HOME}/databases:/var/lib/mysql" -v "${HOME}/database_config:/etc/mysql/conf.d" -e MYSQL_ROOT_PASSWORD=root "$MYSQL_CONTAINER" > /dev/null
+  if [ $? == 0 ]; then
+    log_success "Started MySQL container"
+  else
+    log_error "Error starting the MySQL container. See error messages above!"
+  fi
+
+}
+
+function stop_container {
+  NAME=$1
+  if is_running $NAME; then
+    log_info "Stopping $NAME"
+    docker stop $NAME > /dev/null
+    log_success "Stopped $NAME"
+  else
+    log_info "$NAME not running"
+  fi
+}
+
+# Print errormessages in red
+function log_error {
+  COLOR='\033[0;31m'
+  NC='\033[0m'
+  TEXT=$1
+  echo -e "> ${COLOR}$TEXT${NC}"
+}
+
+# Print normal log messages in white
+function log_info {
+  WHITE='\033[0;37m'
+  NC='\033[0m'
+  TEXT=$1
+  echo -e "> ${WHITE}$TEXT${NC}"
+}
+
+# Print success messages in green
+function log_success {
+  GREEN='\033[0;32m'
+  NC='\033[0m'
+  TEXT=$1
+  echo -e "> ${GREEN}$TEXT${NC}"
+}
+
+function start {
+    create_volumes
+    start_mysql
+    if is_running "flask"; then
+      log_success "Flask container already running"
+      exit
+    else
+      log_info "Need to start Flask container"
+    fi
+
+    docker run --rm -d --name flask -p 8080:5000 -v "${PWD}:/local" --link mysql:mysql "$FLASK_CONTAINER" > /dev/null
+    if [ $? == 0 ]; then
+      log_success "Started Flask environment in ${PWD}"
+      log_info "Now create something awesome 🚀"
+    else
+      log_error "Error starting the flask container. See error messages above!"
+    fi
+}
+
+case "$1" in
+
+  'offlinestart')
+    start
+    ;;
+
+  'start')
+    if should_pull "$FLASK_CONTAINER"; then
+      log_info "Pulling new flask container"
+      docker pull "$FLASK_CONTAINER" > /dev/null
+    fi
+
+    start
+    ;;
+
+  'stop')
+    stop_container "flask"
+    ;;
+
+  'stopall')
+    stop_container "mysql"
+    stop_container "flask"
+    ;;
+
+  'restart')
+    $0 stop
+    $0 start
+    ;;
+
+  'shell')
+    docker exec -it flask /bin/bash
+    ;; 
+
+  'create')
+    docker exec flask /bin/bash -c "mysqladmin create ${2}"
+    ;;
+
+  'drop')
+    docker exec -it flask /bin/bash -c "mysqladmin drop ${2}"
+    ;;
+
+  'import')
+    docker exec -it flask /bin/bash -c "extract.sh ${2} ${3}"
+    ;;
+
+  'gulp')
+    COMMAND=$2
+    docker exec -it flask /bin/bash -c "gulp.sh $COMMAND"
+    ;;
+
+  'selfupdate')
+    log_info "Getting latest version from GitHub"
+    SCRIPT=$0
+    GITHUB_URL="https://raw.githubusercontent.com/codemonauts/flask-dev-env/master/bin/craft"
+    curl -s "$GITHUB_URL" > "$SCRIPT"
+    log_success "Done"
+    ;;
+
+  *)
+    echo "Unknown command. Available commands are:"
+    echo "start, offlinestart, stop, stopall, shell, create, drop, import, gulp, selfupdate"
+  ;;
+
+esac
