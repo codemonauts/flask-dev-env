@@ -174,7 +174,7 @@ case "$1" in
   'selfupdate')
     log_info "Getting latest version from GitHub"
     SCRIPT=$0
-    GITHUB_URL="https://raw.githubusercontent.com/codemonauts/flask-dev-env/master/bin/craft"
+    GITHUB_URL="https://raw.githubusercontent.com/codemonauts/flask-dev-env/master/bin/flask"
     curl -s "$GITHUB_URL" > "$SCRIPT"
     log_success "Done"
     ;;
