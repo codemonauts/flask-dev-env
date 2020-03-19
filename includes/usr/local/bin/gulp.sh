@@ -1,5 +1,8 @@
 #!/bin/bash
 
+cd /local
+pipenv install
+
 if [ -e /local/.env.local ]; then
 	echo "Copying .env.local to .env"
 	cp /local/.env.local /local/.env
